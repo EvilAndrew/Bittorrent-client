@@ -4,9 +4,7 @@ import struct
 import bencodepy
 import hashlib
 import time
-import aiohttp
 import asyncio
-import urllib
 import requests
 from urllib.parse import urlparse
 from pprint import pprint
@@ -29,17 +27,36 @@ class BaseTorrentClass:
         self.in_process = dict()
         self.piece_data = dict()
 
+        self.pieces_number = len(self.decoded_file[b'info'][b'pieces'])//20
+
+        for i in range(self.pieces_number):
+            total_length = decoded_file[b'info'][b'length']
+            piece_length = decoded_file[b'info'][b'piece length']
+            self.left[i] = min(piece_length,
+                               total_length - i*piece_length)
+
         if self.announce_url.startswith(b'udp'):
             self.protocolType = UDPTorrent
-        if self.announce_url.startswith(b'http'):
+        elif self.announce_url.startswith(b'http'):
             self.protocolType = HTTPTorrent
     
     def convert(self, newClass):
         self.__class__ = newClass
-    
+
+    def get_piece_hash(self, piece_index):
+        length = self.pieces_number
+
+        SHA1_LENGTH = 20
+        L = SHA1_LENGTH*piece_index
+        R = SHA1_LENGTH*(piece_index + 1)
+
+        R = min(R, length*20)
+
+        return self.decoded_file[b'info'][b'pieces'][L:R]
+
     def get_piece_length(self, piece_index):
         piece_length = self.decoded_file[b'info'][b'piece length']
-        if piece_index + 1 == len(self.decoded_file[b'info'][b'pieces']):
+        if piece_index + 1 == self.pieces_number:
             total_length = self.decoded_file[b'info'][b'length']
             return total_length - piece_length*piece_index
         return piece_length
@@ -60,7 +77,7 @@ class BaseTorrentClass:
     def finish(self):
         name = self.decoded_file[b'info'][b'name'].decode('utf-8')
         with open(name, mode='wb+') as file:
-            for i in range(len(self.decoded_file[b'info'][b'pieces'])):
+            for i in range(self.pieces_number):
                 with open(name + ';' + str(i), mode='rb') as piece_file:
                     file.write(piece_file.read())
 
@@ -184,8 +201,9 @@ class HTTPTorrent(BaseTorrentClass):
         }
     
     def start(self):
-        params = self.initial_announce_parameters(self.info_hash, self.peer_id, self.decoded_file[b'info'][b'length'])
-        # url = self.announce_url.decode() + '?' + urllib.urlencode(params)
+        params = self.initial_announce_parameters(self.info_hash,
+                            self.peer_id,
+                            self.decoded_file[b'info'][b'length'])
         response = requests.get(self.announce_url.decode(), params=params)
         response = bencodepy.decode(response.content)
         peer_bin_string = response[b'peers']
@@ -199,6 +217,7 @@ class HTTPTorrent(BaseTorrentClass):
                 self.peers.append(
                     Peer('.'.join(map(str, ip)), port)
                 )
+            pprint(self.peers)
         except Exception as E:
             print(f'peers exception: {E}')
 

@@ -36,7 +36,6 @@ class Peer:
         HEADER_LENGTH = len(b"\x13BitTorrent protocol")
         RESERVED_LENGTH = 8
         INFO_HASH_LENGTH = 20
-
         return struct.unpack('!20s', message[HEADER_LENGTH + RESERVED_LENGTH + INFO_HASH_LENGTH:])
 
     async def handshake(self, info_hash, peer_id, loop):
@@ -65,9 +64,8 @@ class Peer:
                 raise Exception('Peer disconnected')
         
         except Exception as E:
-            print(f'handshake: {E}')
-            print(E.__class__)
-            print()
+            # print(f'handshake: {E}')
+            # print()
 
             if writer != None and not writer.is_closing:
                 writer.close()
@@ -98,11 +96,14 @@ class Peer:
         self.__init__(self.port, self.ip)
 
     def compare_hash(self, obj, piece, piece_index):
-        need_hash = obj.decoded_file[b'info'][b'pieces'][piece_index].decode('utf-8')
+        need_hash = obj.get_piece_hash(piece_index)
         cur_hash = hashlib.sha1(piece).digest()
+
         return cur_hash == need_hash
 
     async def finish_downloading_piece(self, obj, piece_index):
+        print("FINISHED DOWNLOADING PIECE NUMBER", piece_index)
+
         piece = obj.piece_data[piece_index]
         del obj.piece_data[piece_index]
         del obj.in_process[piece_index]
@@ -112,6 +113,10 @@ class Peer:
         if not self.compare_hash(obj, piece, piece_index):
             obj.left[piece_index] = piece_length
         else:
+            print()
+            print("SUCCESFULLY FINISHED DOWNLOADING PIECE NUMBER", piece_index)
+            print()
+
             obj.downloaded[piece_index] = piece_length
             filename = obj.decoded_file[b'info'][b'name'].decode('utf-8')
             filename += ';' + str(piece_index)
@@ -119,12 +124,15 @@ class Peer:
             async with aiofiles.open(filename, mode='wb+') as piece_file:
                 await piece_file.write(piece)
 
-    async def save_block(self, reader, writer, obj, piece_index, piece_offset, block):
+    async def save_block(self, reader, writer, obj,
+                        piece_index, piece_offset, block):
         piece_length = obj.get_piece_length(piece_index)
-        obj.piece_data = obj.piece_data.get(piece_index, b'') + block
+        obj.piece_data[piece_index] =\
+            obj.piece_data.get(piece_index, b'') + block
         if piece_offset + len(block) >= piece_length:
             await self.finish_downloading_piece(obj, piece_index)
         else:
+            obj.in_process[piece_index] = len(obj.piece_data[piece_index])
             await self.send_request(reader, writer, obj, piece_index)
 
     async def make_interested(self, writer):
@@ -135,71 +143,99 @@ class Peer:
         await writer.drain()
 
     async def start_chatting(self, reader, writer, obj, loop):
-        async for byte_message in PeerMessageIterator(reader):
-            if not obj.check_time():
-                raise Exception("Tracker timeout (needs reconnecting)") 
-            type = PeerMessage.determine_type(byte_message)
-            length = byte_message[: PeerMessage.HEADER_LENGTH]
-            
-            if type == PeerMessage.KEEP_ALIVE:
-                pass
-            
-            elif type == PeerMessage.CHOKE:
-                self.states.discard(PeerMessage.UNCHOKE)
-                self.states.add(PeerMessage.CHOKE)
-            
-            elif type == PeerMessage.UNCHOKE:
-                self.states.discard(PeerMessage.CHOKE)
-                self.states.add(PeerMessage.UNCHOKE)
+        print("start_chatting started")
+        try:
+            async for byte_message in PeerMessageIterator(reader):
+                if not obj.check_time():
+                    raise Exception("Tracker timeout (needs reconnecting)")
+                if byte_message is None:
+                    continue
 
-            elif type == PeerMessage.INTERESTED:
-                pass
-            elif type == PeerMessage.NOT_INTERESTED:
-                pass
+                type = PeerMessage.determine_type(byte_message)
+                length = byte_message[: int(PeerMessage.HEADER_LENGTH)]
 
-            elif type == PeerMessage.HAVE:
-                piece_index = byte_message[
-                    PeerMessage.HEADER_LENGTH + PeerMessage.ID_LENGTH :
-                ]
-                self.has_pieces.add(piece_index)
+                print(type)
 
-            elif type == PeerMessage.BITFIELD:
-                bitfield = byte_message[
-                    PeerMessage.HEADER_LENGTH + PeerMessage.ID_LENGTH :
-                ]
-                for i in range(len(bitfield)):
-                    if bitfield[i] == b'1':
-                        self.has_pieces.add(i)
-            
-            elif type == PeerMessage.REQUEST:
-                pass
-            
-            elif type == PeerMessage.PIECE:
-                l = PeerMessage.HEADER_LENGTH + PeerMessage.ID_LENGTH
-                r = l + PeerMessage.INT_LENGTH
-                piece_index = byte_message[l:r]
-                piece_offset = byte_message[r : r + PeerMessage.INT_LENGTH]
-                block = byte_message[r + PeerMessage.INT_LENGTH :]
-                await self.save_piece_block(reader, writer, obj, piece_index, piece_offset, block)
-            
-            elif type == PeerMessage.CANCEL:
-                pass
-            elif type == PeerMessage.PORT:
-                pass
-            
-            if PeerMessage.INTERESTED not in self.states:
-                await self.make_interested(writer)
-            
-            if (PeerMessage.INTERESTED in self.states
-                and PeerMessage.UNCHOKE in self.states
-                and self.available):
-                for piece_index in self.has_pieces:
-                    if piece_index in obj.left:
-                        obj.in_process[piece_index] = 0
-                        del obj.left[piece_index]
+                if type is PeerMessage.KEEP_ALIVE:
+                    pass
 
-                        self.available = False
-                        await self.send_request(reader, writer, obj, piece_index)
+                elif type is PeerMessage.CHOKE:
+                    self.states.discard(PeerMessage.UNCHOKE)
+                    self.states.add(PeerMessage.CHOKE)
+
+                elif type is PeerMessage.UNCHOKE:
+                    self.states.discard(PeerMessage.CHOKE)
+                    self.states.add(PeerMessage.UNCHOKE)
+
+                elif type is PeerMessage.INTERESTED:
+                    pass
+                elif type is PeerMessage.NOT_INTERESTED:
+                    pass
+
+                elif type is PeerMessage.HAVE:
+                    piece_index = byte_message[
+                        int(PeerMessage.HEADER_LENGTH) +\
+                        int(PeerMessage.ID_LENGTH) :
+                    ]
+                    print('HAVE', int.from_bytes(piece_index, "big"))
+                    self.has_pieces.add(int.from_bytes(piece_index, "big"))
+
+                elif type is PeerMessage.BITFIELD:
+                    print('BITFIELD')
+                    bitfield = byte_message[
+                        int(PeerMessage.HEADER_LENGTH) +\
+                        int(PeerMessage.ID_LENGTH) :
+                    ]
+                    for i in range(len(bitfield)):
+                        for j in range(8):
+                            if (1 << j) & bitfield[i]:
+                                self.has_pieces.add(i*8 + j)
+                
+                elif type is PeerMessage.REQUEST:
+                    pass
+                
+                elif type is PeerMessage.PIECE:
+                    print("A PIECE HAS COME")
+                    l = int(PeerMessage.HEADER_LENGTH)\
+                        + int(PeerMessage.ID_LENGTH)
+                    r = l + int(PeerMessage.INT_LENGTH)
+                    piece_index = byte_message[l:r]
+                    piece_index = int.from_bytes(piece_index, "big")
+
+                    piece_offset = byte_message[r : r + int(PeerMessage.INT_LENGTH)]
+                    piece_offset = int.from_bytes(piece_offset, "big")
+
+                    block = byte_message[r + int(PeerMessage.INT_LENGTH) :]
+
+                    print("SAVING THE BLOCK", piece_index, piece_offset)
+                    await self.save_block(reader, writer, obj,
+                            piece_index,
+                            piece_offset, block)
+                    print("SAVED THE BLOCK")
+                elif type is PeerMessage.CANCEL:
+                    pass
+                elif type is PeerMessage.PORT:
+                    pass
+
+                if PeerMessage.INTERESTED not in self.states:
+                    await self.make_interested(writer)
+ 
+                if (PeerMessage.INTERESTED in self.states
+                    and PeerMessage.UNCHOKE in self.states
+                    and self.available):
+
+                    print("TRYING TO REQUEST")
+
+                    for piece_index in self.has_pieces:
+                        if piece_index in obj.left:
+                            obj.in_process[piece_index] = 0
+                            del obj.left[piece_index]
+
+                            self.available = False
+                            print("REQUEST SENT")
+                            await self.send_request(reader, writer, obj, piece_index)
+        except Exception as E:
+            print("ASYNC FOR EXCEPTION", E)
 
     async def proceed_peer_wrapper(self, obj, loop):
         try:
@@ -211,14 +247,15 @@ class Peer:
         if not obj.check_time():
             raise Exception("Tracker timeout (needs reconnecting)")
         data, reader, writer = await self.handshake(obj.info_hash, obj.peer_id, loop)
-        print(data, reader, writer)
+        # print(data, reader, writer)
         if not reader or not writer:
             return
         if not data or not self.check_handshake_message(data, obj.info_hash):
             return
-        self.peer_id = self.parse_handshake_message()
-
-        print(f'Handshake initiated {self.ip}, {self.port} {self.peer_id}')
+        # print('handshake parse: in')
+        self.peer_id = self.parse_handshake_message(data)
+        # print('handshake parse: out')
+        print(f'Handshake initiated {self.ip}, {self.port}, {self.peer_id}')
 
         try:
             if not obj.check_time():
@@ -236,39 +273,38 @@ class PeerMessageIterator:
     def __init__(self, reader):
         self.reader = reader
         self.buffer = b''
-    
+
     def __aiter__(self):
         return self
 
     async def __anext__(self):
-        while True:
-            try:
-                data = await self.reader.read(PeerMessageIterator.CHUNK_SIZE)
-                self.buffer += data
-                message = self.parse() # changes buffer and its length if successful
-                if message:
-                    return message
-                if not data:
-                    raise StopAsyncIteration
-            except:
+        try:
+            data = await self.reader.read(PeerMessageIterator.CHUNK_SIZE)
+            self.buffer += data
+            message = self.parse() # changes buffer and its length if successful
+            if message is not None:
+                return message
+            if not data:
                 raise StopAsyncIteration
+        except:
+            raise StopAsyncIteration
 
     def parse(self):
-        if len(self.buffer) < PeerMessage.HEADER_LENGTH:
+        HEADER_LENGTH = int(PeerMessage.HEADER_LENGTH)
+        if len(self.buffer) < HEADER_LENGTH:
             return None
-        length = struct.unpack('!I', self.buffer[: PeerMessage.HEADER_LENGTH])
+        length = struct.unpack('!I', self.buffer[: HEADER_LENGTH])[0]
 
-        if len(self.buffer) < length + PeerMessage.HEADER_LENGTH:
+        if len(self.buffer) < length + HEADER_LENGTH:
             return None
 
-        message = self.buffer[: PeerMessage.HEADER_LENGTH + length]
+        message = self.buffer[: HEADER_LENGTH + length]
 
-        self.buffer = self.buffer[PeerMessage.HEADER_LENGTH + length :]
+        self.buffer = self.buffer[HEADER_LENGTH + length :]
 
         return message
 
-
-class PeerMessage(enum.Enum):
+class PeerMessage(enum.IntEnum):
     KEEP_ALIVE = -1
 
     CHOKE = 0
@@ -286,11 +322,12 @@ class PeerMessage(enum.Enum):
     ID_LENGTH = 1
     INT_LENGTH = 4
 
-    def determine_type(self, byte_message):
-        length = struct.unpack('!I', byte_message[: PeerMessage.HEADER_LENGTH])
+    def determine_type(byte_message : bytes):
+        HEADER_LENGTH = int(PeerMessage.HEADER_LENGTH)
+        length = struct.unpack('!I', byte_message[: HEADER_LENGTH])[0]
         if length == 0:
             return PeerMessage.KEEP_ALIVE
 
-        id = struct.unpack('!B', byte_message[PeerMessage.HEADER_LENGTH])
+        id = byte_message[HEADER_LENGTH]
 
         return PeerMessage(id)
