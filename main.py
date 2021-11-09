@@ -32,5 +32,11 @@ def establish_connection(torrent_name):
         loop.run_until_complete(process(obj, loop))
 
 if __name__ == '__main__':
-    torrent_name = "C:\\Users\\Andrew\\Desktop\\Trisquel Netinstaller 9.0.1 32bit ISO.torrent"
+    # WILL BE ALTERED
+    # BUT CURRENTLY input() IS A PLACEHOLDER
+
+    # path to your torrent file
+    # for example, "Trisquel Netinstaller 9.0.1 32bit ISO.torrent"
+    torrent_name = input()
+
     establish_connection(torrent_name)
