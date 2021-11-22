@@ -1,0 +1,5 @@
+bencodepy==0.9.5
+requests==2.26.0
+urllib3==1.26.6
+aiofiles==0.7.0
+rich==10.13.0

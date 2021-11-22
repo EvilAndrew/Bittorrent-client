@@ -4,8 +4,8 @@ import struct
 import bencodepy
 import hashlib
 import time
-import asyncio
 import requests
+import os
 from urllib.parse import urlparse
 from pprint import pprint
 from peer_controller import Peer
@@ -39,7 +39,15 @@ class BaseTorrentClass:
             self.protocolType = UDPTorrent
         elif self.announce_url.startswith(b'http'):
             self.protocolType = HTTPTorrent
-    
+
+    def percent_downloaded(self):
+        ratio = sum(self.downloaded.values())\
+                + sum(self.in_process.values())
+
+        ratio /= self.decoded_file[b'info'][b'length']
+
+        return int(ratio * 1000)/10
+
     def convert(self, newClass):
         self.__class__ = newClass
 
@@ -80,6 +88,7 @@ class BaseTorrentClass:
             for i in range(self.pieces_number):
                 with open(name + ';' + str(i), mode='rb') as piece_file:
                     file.write(piece_file.read())
+                os.remove(name + ';' + str(i))
 
 class UDPTorrent(BaseTorrentClass):
     def create_connection_request(self):
@@ -169,11 +178,9 @@ class UDPTorrent(BaseTorrentClass):
                             Peer('.'.join(map(str, ip)), port)
                         )
                     except Exception as e:
-                        print('abacaba e:', e)
                         break
                 break
             except Exception as E:
-                print('E:', E)
                 return
 
     def start(self):
@@ -217,8 +224,7 @@ class HTTPTorrent(BaseTorrentClass):
                 self.peers.append(
                     Peer('.'.join(map(str, ip)), port)
                 )
-            pprint(self.peers)
         except Exception as E:
-            print(f'peers exception: {E}')
+            pass
 
         return response[b'interval']
