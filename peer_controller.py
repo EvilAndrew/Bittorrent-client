@@ -4,8 +4,10 @@ import enum
 import aiofiles
 import hashlib
 
-# class that does the main work of downloading data
-# from a single peer
+"""
+    class that does the main work of downloading data
+    from a single peer
+"""
 class Peer:
     def __init__(self, ip, port):
         self.ip = ip
@@ -103,8 +105,10 @@ class Peer:
     def clear_peer(self):
         self.__init__(self.port, self.ip)
 
-    # retrieves hash from the .torrent files
-    # and compares it with what we have now
+    """
+        retrieves hash from the .torrent files
+        and compares it with what we have now
+    """
     def compare_hash(self, obj, piece, piece_index):
         need_hash = obj.get_piece_hash(piece_index)
 
@@ -112,9 +116,11 @@ class Peer:
 
         return cur_hash == need_hash
 
-    # saves the piece into a separate file
-    # to "clear" RAM used by the Python program
-    # and instead translate that piece into hard-disk space
+    """
+        saves the piece into a separate file
+        to "clear" RAM used by the Python program
+        and instead translate that piece into hard-disk space
+    """
     async def finish_downloading_piece(self, obj, piece_index):
 
         piece = obj.piece_data[piece_index]
@@ -124,8 +130,10 @@ class Peer:
 
         piece_length = obj.get_piece_length(piece_index)
 
-        # what if something has gone wrong
-        # and piece-hashes do not match
+        """
+            what if something has gone wrong
+            and piece-hashes do not match
+        """
         if not self.compare_hash(obj, piece, piece_index):
             obj.left[piece_index] = piece_length
 
@@ -139,8 +147,10 @@ class Peer:
 
             self.available = True
 
-            # asynchronous library to work with files
-            # so that we did not wait additional time
+            """
+                asynchronous library to work with files
+                so that we did not wait additional time
+            """
             async with aiofiles.open(filename, mode='wb+') as piece_file:
                 await piece_file.write(piece)
 
@@ -171,10 +181,12 @@ class Peer:
 
         await writer.drain()
 
-    # the core method of the whole class
-    # manages all the downloading/requesting parts
-    # depending on the type of byte messages received
-    # from the implemented iterator
+    """
+        the core method of the whole class
+        manages all the downloading/requesting parts
+        depending on the type of byte messages received
+        from the implemented iterator
+    """
     async def start_chatting(self, reader, writer, obj, loop):
         try:
             async for byte_message in PeerMessageIterator(reader):
@@ -223,10 +235,12 @@ class Peer:
                         int(PeerMessage.ID_LENGTH) :
                     ]
 
-                    # unparses bitfield because it is received
-                    # in composed format
-                    # containing 0s and 1s
-                    # but in byte-length integers
+                    """
+                        unparses bitfield because it is received
+                        in composed format
+                        containing 0s and 1s
+                        but in byte-length integers
+                    """
 
                     for i in range(len(bitfield)):
                         # iterating through byte-length
@@ -238,10 +252,13 @@ class Peer:
                 elif type is PeerMessage.REQUEST:
                     pass
 
-                # if the thing that has come in byte_message
-                # is file-data (i.e., a piece of that file-data)
+                    """
+                    if the thing that has come in byte_message
+                    is file-data (i.e., a piece of that file-data)
+                    """
 
                 elif type is PeerMessage.PIECE:
+
                     # requires some parsing first
                     l = int(PeerMessage.HEADER_LENGTH)\
                         + int(PeerMessage.ID_LENGTH)
@@ -258,11 +275,13 @@ class Peer:
 
                     block = byte_message[r + int(PeerMessage.INT_LENGTH) :]
 
-                    # pieces of file-data do not come entirely
-                    # so the file-data is divided into pieces
-                    # which are divided into blocks
-                    # and save_block(...) saves the blocks inside pieces
-                    # and controls what is requested next in the corresponding piece
+                    """
+                        pieces of file-data do not come entirely
+                        so the file-data is divided into pieces
+                        which are divided into blocks
+                        and save_block(...) saves the blocks inside pieces
+                        and controls what is requested next in the corresponding piece
+                    """
 
                     await self.save_block(reader, writer, obj,
                             piece_index,
@@ -282,12 +301,16 @@ class Peer:
                     and PeerMessage.UNCHOKE in self.states\
                     and self.available:
 
-                    # which pieces the peers has
-                    # is derived from HAVE and BITFIELD messages
+                    """
+                        which pieces the peers has
+                        is derived from HAVE and BITFIELD messages
+                    """
                     for piece_index in self.has_pieces:
 
-                        # if we have not started downloading the piece
-                        # nor it is in process of downloading either
+                        """
+                            if we have not started downloading the piece
+                            nor it is in process of downloading either
+                        """
                         if piece_index in obj.left:
                             obj.in_process[piece_index] = 0
                             del obj.left[piece_index]
@@ -298,8 +321,10 @@ class Peer:
         except Exception as E:
             pass
 
-    # just a function wrapper
-    # in case something goes wrong in that function
+    """
+        simply a function wrapper
+        in case something goes wrong in that function
+    """
     async def proceed_peer_wrapper(self, obj, loop):
         try:
             await self.proceed_peer(obj, loop)
@@ -313,13 +338,17 @@ class Peer:
 
         data, reader, writer = await self.handshake(obj.info_hash, obj.peer_id, loop)
 
-        # in case something went wrong
-        # and handshake didn't return reader or writer objects
+        """
+            in case something went wrong
+            and handshake did not return reader or writer objects
+        """
         if not reader or not writer:
             return
 
-        # if handshake data has not been read successfully
-        # or the handshake message itself is wrong
+        """
+            if handshake data has not been read successfully
+            or the handshake message itself is wrong
+        """
         if not data or not self.check_handshake_message(data, obj.info_hash):
             return
 
@@ -333,8 +362,10 @@ class Peer:
             await self.start_chatting(reader, writer, obj, loop)
         except Exception as E:
 
-            # closes the writer object
-            # if it has not been closed yet
+            """
+                closes the writer object
+                if it has not been closed yet
+            """
             if writer != None and not writer.is_closing:
                 writer.close()
                 await writer.wait_closed()
@@ -342,16 +373,21 @@ class Peer:
             # "restarts" the peer if something has gone wrong
             self.clear_peer()
 
-# implementation of asynchronous iterator
-# i.e., __aiter__ and __anext__
 
-# Implemented with saving everything in buffer by chunks
-# until at least one message can be parsed
+"""
+    implementation of asynchronous iterator
+    i.e., __aiter__ and __anext__
+
+    Implemented with saving everything in buffer by chunks
+    until at least one message can be parsed
+"""
 class PeerMessageIterator:
 
-    # customly identified chunk size
-    # which is to be read from peers
-    # every time
+    """
+        customly identified chunk size
+        which is to be read from peers
+        every time
+    """
     CHUNK_SIZE = 1024
 
     def __init__(self, reader):
@@ -362,10 +398,12 @@ class PeerMessageIterator:
     def __aiter__(self):
         return self
 
-    # returns message from buffer
-    # works asynchronously
-    # and is necessary for "async for"
-    # from "start_chatting" method
+    """
+        returns message from buffer
+        works asynchronously
+        and is necessary for "async for"
+        from "start_chatting" method
+    """
     async def __anext__(self):
         try:
             data = await self.reader.read(PeerMessageIterator.CHUNK_SIZE)
@@ -382,8 +420,10 @@ class PeerMessageIterator:
         except:
             raise StopAsyncIteration
 
-    # parses byte_message from buffer
-    # because buffer may contain multiple messages
+    """
+        parses byte_message from buffer
+        because buffer may contain multiple messages
+    """
     def parse(self):
         HEADER_LENGTH = int(PeerMessage.HEADER_LENGTH)
 
@@ -401,10 +441,13 @@ class PeerMessageIterator:
 
         return message
 
-# class for identifying types of message
-# during communication with peers
-# also contains important byte-length of some types
-# enum.IntEnum is analogous to C-like enums
+
+"""
+    class for identifying types of message
+    during communication with peers
+    also contains important byte-length of some types
+    enum.IntEnum is analogous to C-like enums
+"""
 class PeerMessage(enum.IntEnum):
     KEEP_ALIVE = -1
 

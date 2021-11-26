@@ -6,38 +6,67 @@ import time
 import asyncio
 import sys
 
+"""
+    prints how many percents are downloaded
+    every 10 seconds
+"""
 async def async_downloaded_wrapper(obj, console):
     while True:
         console.print(f'Dowloaded: {obj.percent_downloaded()}%')
+
         await asyncio.sleep(10)
 
+"""
+    every 30 seconds checks
+    whether file has been fully downloaded
+    and manages the finishing process if it has
+"""
 async def finish_checker(obj, console):
     while True:
         if obj.is_finished():
             console.print('The torrent is downloaded, finishing the download')
+
             obj.finish()
+
             console.print('The torrent is fully downloaded')
+
             sys.exit(0)
         await asyncio.sleep(30)
 
+"""
+    initiates everything once .torrent file is parsed
+"""
 async def process(obj, loop, console):
     console.print('starting download')
+
     while True:
-        if (not obj.last_announce_time) or (time.time() - obj.last_announce_time >= obj.interval):
+
+        if (not obj.last_announce_time)\
+            or (time.time() - obj.last_announce_time >= obj.interval):
+
             obj.interval = obj.start()
+
             obj.last_announce_time = time.time()
 
             await asyncio.gather(
                 *[peer.proceed_peer_wrapper(obj, loop) for peer in obj.peers if peer.peer_id == None],
+
                 async_downloaded_wrapper(obj, console),
+
                 finish_checker(obj, console)
             )
 
+"""
+    parses .torrent file
+    and create and the main object 
+    which manages the whole downloading process
+"""
 def establish_connection(torrent_name, console):
     with open(torrent_name, mode='rb') as file:
         decoded_file = bencodepy.decode(file.read())
 
         obj = BaseTorrentClass(decoded_file)
+
         obj.convert(obj.protocolType)
 
         try:
